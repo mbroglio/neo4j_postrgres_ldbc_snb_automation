@@ -1,0 +1,36 @@
+services:
+  neo4j-sf01:
+    image: neo4j:5.20.0-community
+    container_name: neo4j-benchmark
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      - NEO4J_AUTH=neo4j/password
+      - NEO4J_server_memory_heap_initial__size=6G
+      - NEO4J_server_memory_heap_max__size=6G
+      - NEO4J_server_memory_pagecache_size=2G
+    volumes:
+      - ./data/neo4j-sf0.1:/data
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 8G
+
+  postgres-sf01:
+    image: postgres:14.4
+    container_name: postgres-benchmark
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_USER=postgres
+      - POSTGRES_DB=ldbcsf01
+    volumes:
+      - ./data/postgres-sf0.1:/var/lib/postgresql/data
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 8G
