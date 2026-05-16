@@ -37,6 +37,14 @@ build:
 up:
 	@echo "Starting databases in background (SF$(SCALE_FACTOR))..."
 	SCALE_FACTOR=$(SCALE_FACTOR) docker compose up -d
+	@echo "Waiting for Neo4j to be ready..."
+	@until docker exec neo4j-benchmark cypher-shell -u neo4j -p password "RETURN 1" >/dev/null 2>&1; do \
+		printf "."; \
+		sleep 2; \
+	done
+	@echo "\nApplying Neo4j constraints and indexes..."
+	cat neo4j_setup.cypher | docker exec -i neo4j-benchmark cypher-shell -u neo4j -p password
+	@echo "Neo4j schema applied successfully."
 
 down:
 	@echo "Stopping databases..."
