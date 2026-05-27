@@ -1,0 +1,9 @@
+[*] Generazione grafici da: /app/temp/scenario3/results.json
+[*] Output directory: /app/temp/scenario3
+
+[OK] Salvato: /app/temp/scenario3/fault_tolerance_timeline.svg
+[OK] Salvato: /app/temp/scenario3/load_balancing.svg
+
+[*] Grafici generati:
+    fault_tolerance_timeline.svg  (215.5 KB)
+    load_balancing.svg  (86.1 KB)

@@ -1,0 +1,111 @@
+{
+  "read_committed": {
+    "target_id": 28587302323389,
+    "dirty_value": 42,
+    "committed_value": 99,
+    "total_reads": 640,
+    "dirty_reads_detected": 0,
+    "isolation_ok": true,
+    "read_latency": {
+      "n": 640,
+      "mean_ms": 1.798,
+      "median_ms": 1.431,
+      "p90_ms": 2.796,
+      "min_ms": 0.538,
+      "max_ms": 19.3
+    },
+    "write_latency": {
+      "n": 320,
+      "mean_ms": 265.082,
+      "median_ms": 201.169,
+      "p90_ms": 546.069,
+      "min_ms": 56.315,
+      "max_ms": 861.22
+    }
+  },
+  "lost_update": {
+    "target_id": 4398046511577,
+    "n_threads": 10,
+    "increment": 1,
+    "non_atomic": {
+      "expected_value": 10,
+      "trials": 20,
+      "lost_updates_per_trial": [
+        9,
+        9,
+        9,
+        9,
+        9,
+        9,
+        9,
+        9,
+        9,
+        9,
+        9,
+        9,
+        9,
+        9,
+        9,
+        9,
+        9,
+        9,
+        9,
+        9
+      ],
+      "mean_lost": 9,
+      "trials_with_loss": 20
+    },
+    "atomic": {
+      "expected_value": 10,
+      "trials": 20,
+      "lost_updates_per_trial": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "mean_lost": 0,
+      "trials_with_loss": 0
+    }
+  },
+  "deadlock": {
+    "node_a": 28587302323389,
+    "node_b": 4398046511577,
+    "total_runs": 20,
+    "total_deadlocks": 20,
+    "rollback_confirmed": 20,
+    "detection_time_ms": {
+      "n": 20,
+      "mean_ms": 35.53,
+      "median_ms": 26.453,
+      "p90_ms": 71.487,
+      "min_ms": 12.375,
+      "max_ms": 103.54
+    }
+  },
+  "metadata": {
+    "timestamp": "2026-05-26T15:27:21.036773",
+    "scale_factor": "0.1",
+    "n_runs": 20,
+    "n_warmup": 3,
+    "n_threads": 8,
+    "n_persons": 1700,
+    "neo4j_version": "5.20.0-community"
+  }
+}

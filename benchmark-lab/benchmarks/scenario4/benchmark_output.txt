@@ -1,0 +1,199 @@
+
+######################################################################
+#  SCENARIO 4: I Punti Deboli – Quando NON usare Neo4j
+#  Data/ora: 2026-05-27 17:09:12
+#  Configurazione: SF 0.1 | N_RUNS=10 | WARMUP=3
+######################################################################
+
+[*] Connessione ai database...
+  [OK] Neo4j connesso
+  [OK] PostgreSQL connesso
+
+======================================================================
+  TEST 4.1 – Full-Table Scan e Aggregazioni Globali
+======================================================================
+  Query: lunghezza media testi dei Post raggruppata per browser.
+  PostgreSQL usa Sequential Scan; Neo4j deve scorrere nodi sparsi.
+
+
+--- Warm-up (cache popolamento) ---
+  [OK] Warm-up completato
+
+--- Neo4j – scansione nodi Post ---
+  Run  1: 67.623 ms
+  Run  2: 66.975 ms
+  Run  3: 66.701 ms
+  Run  4: 74.885 ms
+  Run  5: 75.380 ms
+  Run  6: 68.012 ms
+  Run  7: 64.993 ms
+  Run  8: 70.497 ms
+  Run  9: 65.105 ms
+  Run 10: 68.810 ms
+
+--- PostgreSQL – Sequential Scan ---
+  Run  1: 24.628 ms
+  Run  2: 23.683 ms
+  Run  3: 20.529 ms
+  Run  4: 21.699 ms
+  Run  5: 24.529 ms
+  Run  6: 22.213 ms
+  Run  7: 22.731 ms
+  Run  8: 20.045 ms
+  Run  9: 20.491 ms
+  Run 10: 20.288 ms
+
+  Neo4j:
+    Iterazioni : 10
+    Media      :     68.898 ms
+    Mediana    :     67.817 ms
+    P90        :     75.380 ms
+    Min        :     64.993 ms
+    Max        :     75.380 ms
+  PostgreSQL:
+    Iterazioni : 10
+    Media      :     22.084 ms
+    Mediana    :     21.956 ms
+    P90        :     24.628 ms
+    Min        :     20.045 ms
+    Max        :     24.628 ms
+
+  >>> Speedup PostgreSQL vs Neo4j: 3.12x
+  (PostgreSQL è 3.12x più veloce di Neo4j su questa query)
+
+  Campione risultato Neo4j (prime 3 righe):
+    browser=Chrome  avg_len=115.2  cnt=6317
+    browser=Firefox  avg_len=116.2  cnt=9376
+    browser=Internet Explorer  avg_len=115.6  cnt=6401
+
+  Campione risultato PostgreSQL (prime 3 righe):
+    browser=Chrome  avg_len=115.2  cnt=6317
+    browser=Firefox  avg_len=116.2  cnt=9376
+    browser=Internet Explorer  avg_len=115.6  cnt=6401
+
+======================================================================
+  TEST 4.2 – Inserimento Massivo di Dati Disconnessi (Bulk Insert)
+======================================================================
+  Payload: 50,000 record senza relazioni (anagrafica piatta).
+  PostgreSQL: COPY da buffer in-memory.
+  Neo4j:      UNWIND+CREATE in batch da 1000 record.
+
+  [OK] 50,000 record generati in memoria
+
+--- Neo4j – UNWIND+CREATE (batch insert) ---
+  Run  1:     2198.8 ms  |  50,000 inseriti  |  22,739 rec/s
+  Run  2:     1322.0 ms  |  50,000 inseriti  |  37,821 rec/s
+  Run  3:     1195.1 ms  |  50,000 inseriti  |  41,838 rec/s
+  Run  4:     1161.6 ms  |  50,000 inseriti  |  43,045 rec/s
+  Run  5:     1136.2 ms  |  50,000 inseriti  |  44,005 rec/s
+  Run  6:     1114.3 ms  |  50,000 inseriti  |  44,872 rec/s
+  Run  7:     1094.0 ms  |  50,000 inseriti  |  45,705 rec/s
+  Run  8:     1046.0 ms  |  50,000 inseriti  |  47,803 rec/s
+  Run  9:     1093.6 ms  |  50,000 inseriti  |  45,722 rec/s
+  Run 10:     1119.6 ms  |  50,000 inseriti  |  44,658 rec/s
+  [*] Pulizia nodi BenchmarkRecord da Neo4j...
+  [OK] Pulizia completata
+
+--- PostgreSQL – COPY da buffer in-memory ---
+  Run  1:      120.3 ms  |  50,000 inseriti  |  415,486 rec/s
+  Run  2:       96.8 ms  |  50,000 inseriti  |  516,461 rec/s
+  Run  3:       94.4 ms  |  50,000 inseriti  |  529,649 rec/s
+  Run  4:       96.8 ms  |  50,000 inseriti  |  516,652 rec/s
+  Run  5:       93.6 ms  |  50,000 inseriti  |  534,356 rec/s
+  Run  6:       92.6 ms  |  50,000 inseriti  |  540,020 rec/s
+  Run  7:       92.9 ms  |  50,000 inseriti  |  538,370 rec/s
+  Run  8:       96.9 ms  |  50,000 inseriti  |  516,037 rec/s
+  Run  9:       99.1 ms  |  50,000 inseriti  |  504,326 rec/s
+  Run 10:       91.4 ms  |  50,000 inseriti  |  546,974 rec/s
+
+  Neo4j (UNWIND+CREATE):
+    Iterazioni : 10
+    Media      :   1248.112 ms
+    Mediana    :   1127.919 ms
+    P90        :   2198.828 ms
+    Min        :   1045.956 ms
+    Max        :   2198.828 ms
+  PostgreSQL (COPY):
+    Iterazioni : 10
+    Media      :     97.481 ms
+    Mediana    :     95.590 ms
+    P90        :    120.341 ms
+    Min        :     91.412 ms
+    Max        :    120.341 ms
+
+  Neo4j throughput medio    : 40,061 record/s
+  PostgreSQL throughput medio: 512,920 record/s
+
+  >>> Speedup PostgreSQL vs Neo4j: 12.8x
+
+======================================================================
+  TEST 4.3 – Esplosione Combinatoria nei Cammini Non Filtrati
+======================================================================
+  Dimostra il rischio di query Cypher senza filtri topologici
+  su nodi ad alto branching factor (super-nodi).
+
+
+--- Identificazione del super-nodo (nodo con grado massimo) ---
+  Super-nodo: Person id=910  grado=391 vicini diretti
+  Stima percorsi a 6 hop: ~391^6 ≈ 3,573,226,485,213,841 (ordine di grandezza)
+
+--- 4.3a – Query NON FILTRATA: MATCH (p)-[*1..6]-(q)  [timeout=30s] ---
+  ATTENZIONE: questa query può saturare la RAM e causare OOM/Timeout.
+  Il driver viene limitato a 30s via thread-timeout lato Python.
+
+  ✅ Completata in 1954.3 ms  |  nodi distinti: 448,684
+  NOTA: Su questo dataset (SF 0.1, ~1700 nodi) la query riesce perché il
+        grafo è piccolo. Su dataset reali con milioni di nodi causerebbe OOM.
+
+  Esito: completata
+  Tempo osservato: 1954.3 ms
+
+--- 4.3b – Query CON FILTRI: [:KNOWS*1..3] (tipo + profondità ridotta) ---
+  Stessa semantica ma con vincoli espliciti che limitano la frontiera.
+
+  Run  1: 6.817 ms  |  1,538 nodi distinti
+  Run  2: 7.379 ms  |  1,538 nodi distinti
+  Run  3: 7.235 ms  |  1,538 nodi distinti
+  Run  4: 6.302 ms  |  1,538 nodi distinti
+  Run  5: 6.072 ms  |  1,538 nodi distinti
+  Run  6: 6.204 ms  |  1,538 nodi distinti
+  Run  7: 6.159 ms  |  1,538 nodi distinti
+  Run  8: 9.618 ms  |  1,538 nodi distinti
+  Run  9: 5.860 ms  |  1,538 nodi distinti
+  Run 10: 5.709 ms  |  1,538 nodi distinti
+
+  Query con filtri topologici:
+    Iterazioni : 10
+    Media      :      6.736 ms
+    Mediana    :      6.253 ms
+    P90        :      9.618 ms
+    Min        :      5.709 ms
+    Max        :      9.618 ms
+
+  Variante                       Esito                     Tempo (ms)
+  ----------------------------------------------------------------------
+  Non filtrata [*1..6]           completata                1954.3
+  Filtrata [:KNOWS*1..3]         OK                        6.736 (media)
+
+  >>> Rallentamento query non filtrata vs filtrata: 290.1x
+
+======================================================================
+  RIEPILOGO FINALE – Scenario 4: I Punti Deboli di Neo4j
+======================================================================
+
+Test                                Neo4j (ms)      PostgreSQL (ms)    Speedup PG
+------------------------------------------------------------------------------
+4.1 Aggregazione globale (media)    68.898          22.084             3.12x
+4.2 Bulk Insert (media)             1248.112        97.481             12.8x
+
+Test                                Non filtrata         Filtrata (ms)        Esito
+------------------------------------------------------------------------------
+4.3 Esplosione combinatoria         1954.31ms            6.736                completata
+
+  [4.2] Throughput Neo4j:      40,061 record/s
+  [4.2] Throughput PostgreSQL: 512,920 record/s
+
+[*] Risultati salvati in: /home/teo/neo4j_postrgres_ldbc_snb_automation/benchmark-lab/temp/scenario4/results.json
+
+[*] Connessioni chiuse. Benchmark completato.
+

@@ -8,7 +8,7 @@ The entire lab is now automated via a `Makefile`. This standardizes the build pr
 
 Navigate to the benchmark lab directory:
 ```bash
-cd ~/benchmark-lab
+cd ~/benchmark-lab/infrastructure
 ```
 
 ### Install Prerequisites

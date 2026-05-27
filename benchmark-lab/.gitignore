@@ -1,4 +1,4 @@
-ldbc_snb_interactive_impls
-out-sf*
-data/
-temp/
+infrastructure/ldbc_snb_interactive_impls
+infrastructure/out-sf*
+infrastructure/data/
+__pycache__/
