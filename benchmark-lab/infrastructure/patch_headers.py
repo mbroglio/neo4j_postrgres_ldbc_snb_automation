@@ -9,14 +9,25 @@ def process_entity(entity_type, is_edge):
     if not files:
         return
     
-    # Read header from the first file
-    with open(files[0], 'r') as f:
-        first_line = f.readline().strip()
-        header = first_line.split('|')
+    # Read header from the first non-empty file
+    first_line = ""
+    for f_path in files:
+        with open(f_path, 'r') as f:
+            line = f.readline().strip()
+            if line:
+                first_line = line
+                break
+                
+    if not first_line:
+        print(f"Skipping {entity_type} (all files empty)")
+        return
+        
+    header = first_line.split('|')
     
-    # Check if this file has already been processed (no letters in first fields of first line)
-    # Actually, the most reliable way is to check if the first line is data
-    is_header = any(not part.strip().replace('.','').replace('-','').replace(':','').replace('_','').replace('(','').replace(')','').isdigit() for part in header)
+    # Check if this file has already been processed (first line is data).
+    # In LDBC SNB, data always starts with an ID (digit) or a date (digit).
+    # Headers start with letters (e.g. 'creationDate', 'id', 'PersonId').
+    is_header = not first_line[0].isdigit()
     
     if not is_header:
         print(f"Skipping {entity_type} (already processed)")

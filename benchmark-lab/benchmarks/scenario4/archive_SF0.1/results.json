@@ -1,0 +1,99 @@
+{
+  "test_4_1_global_aggregation": {
+    "neo4j": {
+      "n": 30,
+      "mean_ms": 57.246,
+      "median_ms": 56.886,
+      "stdev_ms": 2.302,
+      "p90_ms": 57.948,
+      "min_ms": 55.979,
+      "max_ms": 69.025
+    },
+    "postgresql": {
+      "n": 30,
+      "mean_ms": 21.271,
+      "median_ms": 21.268,
+      "stdev_ms": 0.174,
+      "p90_ms": 21.433,
+      "min_ms": 20.857,
+      "max_ms": 21.814
+    },
+    "speedup_pg_vs_neo4j": 2.69,
+    "neo4j_rows_returned": 5,
+    "pg_rows_returned": 5
+  },
+  "test_4_2_bulk_insert": {
+    "records": 50000,
+    "batch_size_neo4j": 1000,
+    "neo4j": {
+      "n": 30,
+      "mean_ms": 959.212,
+      "median_ms": 870.858,
+      "stdev_ms": 348.565,
+      "p90_ms": 957.226,
+      "min_ms": 839.252,
+      "max_ms": 2646.528
+    },
+    "postgresql": {
+      "n": 30,
+      "mean_ms": 89.447,
+      "median_ms": 88.601,
+      "stdev_ms": 3.818,
+      "p90_ms": 91.566,
+      "min_ms": 87.257,
+      "max_ms": 107.914
+    },
+    "neo4j_throughput_rps": 52126.0,
+    "pg_throughput_rps": 558990.0,
+    "speedup_pg_vs_neo4j": 10.72
+  },
+  "test_4_3_explosion": {
+    "unfiltered": {
+      "supernode_id": 910,
+      "supernode_degree": 391,
+      "query": "MATCH (p:Person {id: $pid})-[*1..6]-(q) RETURN count(DISTINCT q)",
+      "n_runs": 1,
+      "outcomes": [
+        "TIMEOUT (>300s)"
+      ],
+      "n_timeouts": 1,
+      "n_completed": 0,
+      "stats": {
+        "n": 1,
+        "mean_ms": 300000.0,
+        "median_ms": 300000.0,
+        "stdev_ms": 0.0,
+        "p90_ms": 300000.0,
+        "min_ms": 300000.0,
+        "max_ms": 300000.0
+      },
+      "count_returned": null,
+      "outcome": "0/1 completate, 1 timeout"
+    },
+    "filtered": {
+      "supernode_id": 910,
+      "query": "MATCH (p:Person {id: $pid})-[:KNOWS*1..6]-(q:Person) RETURN count(DISTINCT q)",
+      "stats": {
+        "n": 30,
+        "mean_ms": 5.942,
+        "median_ms": 5.153,
+        "stdev_ms": 3.78,
+        "p90_ms": 6.803,
+        "min_ms": 3.906,
+        "max_ms": 25.545
+      }
+    }
+  },
+  "metadata": {
+    "timestamp": "2026-06-13T13:33:43.069568",
+    "scale_factor": "0.1",
+    "n_persons": 1700,
+    "n_runs": 30,
+    "n_warmup": 20,
+    "bulk_records": 50000,
+    "bulk_batch_size": 1000,
+    "explosion_timeout_s": 300,
+    "neo4j_version": "5.20.0-community",
+    "postgres_version": "14.4"
+  }
+}

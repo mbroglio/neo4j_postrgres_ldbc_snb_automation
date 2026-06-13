@@ -1,13 +1,14 @@
 #!/bin/bash
 set -e
 
-echo "============================================="
-echo "🚀 STARTING MASTER DATABASE BUILDER (SF0.1) 🚀"
-echo "============================================="
-
 # Define paths
 LAB_DIR=$(pwd)
 SCALE_FACTOR="${SCALE_FACTOR:-0.1}"
+
+echo "============================================="
+echo "🚀 STARTING MASTER DATABASE BUILDER (SF${SCALE_FACTOR}) 🚀"
+echo "============================================="
+
 export RAW_DATA_DIR="$LAB_DIR/out-sf${SCALE_FACTOR}/graphs/csv/raw/composite-projected-fk"
 NEO4J_TARGET_DIR="$LAB_DIR/data/neo4j-sf${SCALE_FACTOR}"
 POSTGRES_TARGET_DIR="$LAB_DIR/data/postgres-sf${SCALE_FACTOR}"
@@ -100,6 +101,16 @@ python3 postgres_prep.py
 echo "PostgreSQL CSVs successfully filtered and formatted!"
 
 cd "$LDBC_PG_SCRIPTS"
+
+# Wipe the postgres data dir so the container always gets a fresh init.
+# Must use docker (ubuntu) because the dir may be owned by root or the
+# container-internal postgres uid (999) from a previous run.
+echo "Wiping stale PostgreSQL data directory (if any): $POSTGRES_TARGET_DIR"
+docker run --rm \
+  -v "$(dirname "$POSTGRES_TARGET_DIR")":/pgdata \
+  ubuntu \
+  rm -rf "/pgdata/$(basename "$POSTGRES_TARGET_DIR")"
+mkdir -p "$POSTGRES_TARGET_DIR"
 
 # Reset vars.sh to its original state just in case
 git checkout -- vars.sh

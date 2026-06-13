@@ -3,25 +3,29 @@
     "target_id": 28587302323389,
     "dirty_value": 42,
     "committed_value": 99,
-    "total_reads": 640,
+    "total_reads": 960,
     "dirty_reads_detected": 0,
     "isolation_ok": true,
     "read_latency": {
-      "n": 640,
-      "mean_ms": 1.798,
-      "median_ms": 1.431,
-      "p90_ms": 2.796,
-      "min_ms": 0.538,
-      "max_ms": 19.3
+      "n": 960,
+      "mean_ms": 2.362,
+      "median_ms": 1.184,
+      "stdev_ms": 15.099,
+      "p90_ms": 2.266,
+      "min_ms": 0.415,
+      "max_ms": 237.929
     },
     "write_latency": {
-      "n": 320,
-      "mean_ms": 265.082,
-      "median_ms": 201.169,
-      "p90_ms": 546.069,
-      "min_ms": 56.315,
-      "max_ms": 861.22
-    }
+      "n": 480,
+      "mean_ms": 264.098,
+      "median_ms": 215.476,
+      "stdev_ms": 163.485,
+      "p90_ms": 485.232,
+      "min_ms": 54.531,
+      "max_ms": 1069.554
+    },
+    "write_latency_note": "INCLUDE sleep deliberato di 50-100ms (finestra Dirty Read). Latenza netta stimata = write_latency.mean_ms - 75ms.",
+    "net_write_latency_ms": 189.098
   },
   "lost_update": {
     "target_id": 4398046511577,
@@ -29,8 +33,18 @@
     "increment": 1,
     "non_atomic": {
       "expected_value": 10,
-      "trials": 20,
+      "trials": 30,
       "lost_updates_per_trial": [
+        8,
+        9,
+        9,
+        9,
+        9,
+        9,
+        9,
+        9,
+        9,
+        9,
         9,
         9,
         9,
@@ -52,13 +66,23 @@
         9,
         9
       ],
-      "mean_lost": 9,
-      "trials_with_loss": 20
+      "mean_lost": 8.97,
+      "trials_with_loss": 30
     },
     "atomic": {
       "expected_value": 10,
-      "trials": 20,
+      "trials": 30,
       "lost_updates_per_trial": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
         0,
         0,
         0,
@@ -87,23 +111,24 @@
   "deadlock": {
     "node_a": 28587302323389,
     "node_b": 4398046511577,
-    "total_runs": 20,
-    "total_deadlocks": 20,
-    "rollback_confirmed": 20,
+    "total_runs": 30,
+    "total_deadlocks": 30,
+    "rollback_confirmed": 30,
     "detection_time_ms": {
-      "n": 20,
-      "mean_ms": 35.53,
-      "median_ms": 26.453,
-      "p90_ms": 71.487,
-      "min_ms": 12.375,
-      "max_ms": 103.54
+      "n": 30,
+      "mean_ms": 37.628,
+      "median_ms": 21.691,
+      "stdev_ms": 31.543,
+      "p90_ms": 94.114,
+      "min_ms": 11.922,
+      "max_ms": 102.579
     }
   },
   "metadata": {
-    "timestamp": "2026-05-26T15:27:21.036773",
+    "timestamp": "2026-06-13T13:23:13.576160",
     "scale_factor": "0.1",
-    "n_runs": 20,
-    "n_warmup": 3,
+    "n_runs": 30,
+    "n_warmup": 20,
     "n_threads": 8,
     "n_persons": 1700,
     "neo4j_version": "5.20.0-community"

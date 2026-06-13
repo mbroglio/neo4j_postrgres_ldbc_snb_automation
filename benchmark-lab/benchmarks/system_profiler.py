@@ -120,10 +120,15 @@ def plot_ram_usage(
     title="Allocazione Dinamica RAM",
     filename="ram_usage_plot.svg",
 ):
-    """Genera un grafico a doppio pannello dell'utilizzo assoluto di RAM.
+    """Genera un grafico a doppio pannello della variazione di RAM dei container Docker.
 
-    Pannello Superiore: PostgreSQL (mostra la natura dinamica dell'allocazione per le CTE).
-    Pannello Inferiore: Neo4j (mostra la stabilità della pre-allocazione JVM).
+    Pannello Superiore: PostgreSQL (variazione dinamica durante CTE multi-hop).
+    Pannello Inferiore: Neo4j (baseline alto per heap JVM pre-allocato, variazione minima).
+
+    NOTA METODOLOGICA: i valori assoluti dei due pannelli NON sono confrontabili
+    perché le configurazioni di memoria sono radicalmente diverse (PostgreSQL ~2 GB
+    shared_buffers vs Neo4j 6 GB heap + 2 GB page cache pre-allocati). La metrica
+    rilevante è la sola variazione netta (Δ) durante l'esecuzione della query.
     """
     if not os.path.exists(json_path):
         print(f"Error: {json_path} not found.")
@@ -149,85 +154,125 @@ def plot_ram_usage(
         stats[c] = {"baseline": baseline, "peak": peak, "delta": delta, "raw": lst}
 
     # Identifica le chiavi dei container
-    pg_key = next((c for c in containers if "postgres" in c.lower()), None)
+    pg_key    = next((c for c in containers if "postgres" in c.lower()), None)
     neo4j_key = next((c for c in containers if "neo4j" in c.lower()), None)
 
     if not pg_key or not neo4j_key:
         print("Errore: container non trovati nei dati.")
         return
 
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+    # ---------------------------------------------------------------------------
+    # Stile dark-mode coerente con scenari 1, 2, 3, 4
+    # ---------------------------------------------------------------------------
+    DARK_STYLE = {
+        "figure.facecolor":  "#1a1a2e",
+        "axes.facecolor":    "#16213e",
+        "axes.edgecolor":    "#4a4e69",
+        "axes.labelcolor":   "#e0e0e0",
+        "xtick.color":       "#b0b0b0",
+        "ytick.color":       "#b0b0b0",
+        "text.color":        "#e0e0e0",
+        "grid.color":        "#2a2a4a",
+        "grid.linestyle":    "--",
+        "grid.linewidth":    0.6,
+        "legend.facecolor":  "#16213e",
+        "legend.edgecolor":  "#4a4e69",
+        "font.family":       "DejaVu Sans",
+    }
 
-    # ---- PANNELLO 1: PostgreSQL ----
-    pg_raw = stats[pg_key]["raw"]
-    ax1.plot(
-        ts,
-        pg_raw,
-        color="#e74c3c",
-        linewidth=2.5,
-        label="PostgreSQL RAM (MB)",
-        zorder=3,
-    )
-    ax1.fill_between(ts, 0, pg_raw, color="#e74c3c", alpha=0.15, zorder=2)
+    COLOR_PG    = "#e74c3c"   # rosso  – PostgreSQL RAM
+    COLOR_N4J   = "#2ecc71"   # verde  – Neo4j RAM
+    COLOR_ANNOT = "#f39c12"   # arancio – annotazioni delta
 
-    if "PG_start" in events and "PG_end" in events:
-        ax1.axvspan(
-            events["PG_start"],
-            events["PG_end"],
-            color="#e74c3c",
-            alpha=0.1,
-            label="Esecuzione CTE (PostgreSQL)",
+    with plt.rc_context(DARK_STYLE):
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+
+        # ---- PANNELLO 1: PostgreSQL ----
+        pg_raw  = stats[pg_key]["raw"]
+        pg_base = stats[pg_key]["baseline"]
+        pg_peak = stats[pg_key]["peak"]
+
+        ax1.plot(ts, pg_raw, color=COLOR_PG, linewidth=2.5,
+                 label="PostgreSQL RAM (MB)", zorder=3)
+        ax1.fill_between(ts, pg_base * 0.99, pg_raw,
+                         color=COLOR_PG, alpha=0.15, zorder=2)
+
+        if "PG_start" in events and "PG_end" in events:
+            ax1.axvspan(events["PG_start"], events["PG_end"],
+                        color=COLOR_PG, alpha=0.1, label="Esecuzione CTE (PostgreSQL)")
+            ax1.axvline(events["PG_start"], color=COLOR_PG, ls="--", alpha=0.6, lw=1)
+            ax1.axvline(events["PG_end"],   color=COLOR_PG, ls="--", alpha=0.6, lw=1)
+
+        # Annotazione delta
+        delta_pg = stats[pg_key]["delta"]
+        mid_t = (events.get("PG_start", ts[0]) + events.get("PG_end", ts[-1])) / 2
+        ax1.annotate(
+            f"Δ = +{delta_pg:.2f} MB\n(allocazione dinamica CTE)",
+            xy=(mid_t, pg_peak),
+            xytext=(mid_t + (ts[-1] - ts[0]) * 0.05, pg_peak * 1.002),
+            color=COLOR_ANNOT, fontsize=9, fontweight="bold",
+            arrowprops=dict(arrowstyle="->", color=COLOR_ANNOT, lw=1.2)
         )
-        ax1.axvline(events["PG_start"], color="#e74c3c", ls="--", alpha=0.6, lw=1)
-        ax1.axvline(events["PG_end"], color="#e74c3c", ls="--", alpha=0.6, lw=1)
 
-    ax1.set_ylabel("RAM Allocata (MB)", fontsize=11)
-    ax1.set_title(
-        "PostgreSQL", fontsize=12, fontweight="bold"
-    )
-    ax1.legend(loc="upper left", fontsize=10)
-    ax1.grid(True, ls="--", alpha=0.4)
-    # Imposta un limite inferiore vicino allo zero per enfatizzare la variazione assoluta
-    ax1.set_ylim(
-        bottom=max(0, stats[pg_key]["baseline"] - 10), top=stats[pg_key]["peak"] + 10
-    )
+        ax1.set_ylabel("RAM Allocata (MB)", fontsize=11)
+        ax1.set_title("PostgreSQL – Variazione RAM durante query 4-hop",
+                      fontsize=12, fontweight="bold")
+        ax1.legend(loc="upper left", fontsize=10)
+        ax1.grid(True, which="both", alpha=0.3)
+        ax1.set_ylim(bottom=max(0, pg_base - 5), top=pg_peak + 8)
 
-    # ---- PANNELLO 2: Neo4j ----
-    neo4j_raw = stats[neo4j_key]["raw"]
-    ax2.plot(
-        ts, neo4j_raw, color="#2ecc71", linewidth=2.5, label="Neo4j RAM (MB)", zorder=3
-    )
-    ax2.fill_between(ts, 0, neo4j_raw, color="#2ecc71", alpha=0.15, zorder=2)
+        # ---- PANNELLO 2: Neo4j ----
+        n4j_raw  = stats[neo4j_key]["raw"]
+        n4j_base = stats[neo4j_key]["baseline"]
+        n4j_peak = stats[neo4j_key]["peak"]
 
-    if "Neo4j_start" in events and "Neo4j_end" in events:
-        ax2.axvspan(
-            events["Neo4j_start"],
-            events["Neo4j_end"],
-            color="#2ecc71",
-            alpha=0.15,
-            label="Esecuzione Cypher (Neo4j)",
+        ax2.plot(ts, n4j_raw, color=COLOR_N4J, linewidth=2.5,
+                 label="Neo4j RAM (MB)", zorder=3)
+        ax2.fill_between(ts, n4j_base * 0.9999, n4j_raw,
+                         color=COLOR_N4J, alpha=0.15, zorder=2)
+
+        if "Neo4j_start" in events and "Neo4j_end" in events:
+            ax2.axvspan(events["Neo4j_start"], events["Neo4j_end"],
+                        color=COLOR_N4J, alpha=0.15, label="Esecuzione Cypher (Neo4j)")
+            ax2.axvline(events["Neo4j_start"], color=COLOR_N4J, ls="--", alpha=0.6, lw=1)
+            ax2.axvline(events["Neo4j_end"],   color=COLOR_N4J, ls="--", alpha=0.6, lw=1)
+
+        # Annotazione delta
+        delta_n4j = stats[neo4j_key]["delta"]
+        mid_t2 = (events.get("Neo4j_start", ts[0]) + events.get("Neo4j_end", ts[-1])) / 2
+        ax2.annotate(
+            f"Δ = +{delta_n4j:.2f} MB\n(GC JVM – fisiologico)",
+            xy=(mid_t2, n4j_peak),
+            xytext=(mid_t2 + (ts[-1] - ts[0]) * 0.05, n4j_peak + 5),
+            color=COLOR_ANNOT, fontsize=9, fontweight="bold",
+            arrowprops=dict(arrowstyle="->", color=COLOR_ANNOT, lw=1.2)
         )
-        ax2.axvline(events["Neo4j_start"], color="#2ecc71", ls="--", alpha=0.6, lw=1)
-        ax2.axvline(events["Neo4j_end"], color="#2ecc71", ls="--", alpha=0.6, lw=1)
 
-    ax2.set_xlabel("Tempo (secondi)", fontsize=12)
-    ax2.set_ylabel("RAM Allocata (MB)", fontsize=11)
-    ax2.set_title(
-        "Neo4j", fontsize=12, fontweight="bold"
-    )
-    ax2.legend(loc="upper left", fontsize=10)
-    ax2.grid(True, ls="--", alpha=0.4)
-    # Per Neo4j mostriamo un intervallo ristretto intorno al suo baseline (che è alto)
-    ax2.set_ylim(
-        bottom=stats[neo4j_key]["baseline"] - 50, top=stats[neo4j_key]["peak"] + 50
-    )
+        ax2.set_xlabel("Tempo (secondi)", fontsize=12)
+        ax2.set_ylabel("RAM Allocata (MB)", fontsize=11)
+        ax2.set_title(
+            "Neo4j – Variazione RAM durante query 4-hop\n"
+            "(baseline ~5 GB = Heap JVM + Page Cache pre-allocati per configurazione)",
+            fontsize=12, fontweight="bold"
+        )
+        ax2.legend(loc="upper left", fontsize=10)
+        ax2.grid(True, which="both", alpha=0.3)
+        ax2.set_ylim(bottom=n4j_base - 30, top=n4j_peak + 50)
 
-    # Stile Globale
-    plt.tight_layout()
+        # Footer nota metodologica
+        fig.text(
+            0.02, -0.01,
+            "Nota: i valori assoluti dei due pannelli NON sono confrontabili "
+            "(configurazioni di memoria eterogenee). La metrica rilevante è la sola variazione netta Δ.",
+            fontsize=8, color="#888888", ha="left"
+        )
 
-    out_img = os.path.join(output_dir, filename)
-    plt.savefig(out_img, dpi=300)
-    plt.close()
+        fig.suptitle(title, fontsize=13, fontweight="bold", y=1.01)
+        plt.tight_layout()
+
+        out_img = os.path.join(output_dir, filename)
+        plt.savefig(out_img, format="svg", dpi=300, bbox_inches="tight")
+        plt.close()
 
     # Stampa statistiche per aggiornamento LaTeX
     print("\nSTATISTICHE RAM PER TABELLA LATEX:")

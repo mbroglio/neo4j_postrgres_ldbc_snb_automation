@@ -23,7 +23,11 @@ x-neo4j-common: &neo4j-common
   deploy:
     resources:
       limits:
-        cpus: "1.0"
+        # cpus="1.5" per container: previene che un singolo container monopolizzi
+        # la CPU dell'host, il che causa latenze anomale sulla rete virtuale Docker
+        # (es. un nodo a 6ms, gli altri a 1400ms). Con questo limite ciascun container
+        # ha risorse garantite e le latenze Raft si stabilizzano.
+        cpus: "1.5"
         memory: 1200m
 
 services:

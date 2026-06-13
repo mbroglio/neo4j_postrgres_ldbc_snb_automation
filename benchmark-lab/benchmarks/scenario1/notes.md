@@ -1,6 +1,6 @@
 # Scenario 1 – La Potenza del Grafo (Neo4j vs RDBMS)
 
-> **Esecuzione:** 2026-05-23, 17:43 (CET) — SF 0.1 — N_RUNS=10 — Warmup=3
+> **Esecuzione:** 2026-06-13 — SF 0.1 e SF 1 — N_RUNS=50 — Warmup=20
 > I dati grezzi completi si trovano in [`results.json`](./results.json).
 
 ---

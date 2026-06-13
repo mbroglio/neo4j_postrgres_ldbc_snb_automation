@@ -1,6 +1,6 @@
 # Scenario 2 – Transazioni e Concorrenza (Stress Test)
 
-> **Esecuzione:** 2026-05-26, 15:26 (CET) — SF 0.1 — N_RUNS=20 — N_THREADS=8
+> **Esecuzione:** 2026-06-13 — SF 0.1 e SF 1 — N_RUNS=30 — N_THREADS=8
 > I dati grezzi completi si trovano in [`results.json`](./results.json).
 
 ---

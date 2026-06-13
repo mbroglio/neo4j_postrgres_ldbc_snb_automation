@@ -104,6 +104,7 @@ def plot_aggregation(results: dict, out_dir: str):
     # (media, mediana, p90, min, max)
     labels = ["Neo4j", "PostgreSQL"]
     means  = [neo4j_stats["mean_ms"], pg_stats["mean_ms"]]
+    stdevs = [neo4j_stats.get("stdev_ms", 0), pg_stats.get("stdev_ms", 0)]
     p90s   = [neo4j_stats["p90_ms"],  pg_stats["p90_ms"]]
     mins_  = [neo4j_stats["min_ms"],  pg_stats["min_ms"]]
     maxs_  = [neo4j_stats["max_ms"],  pg_stats["max_ms"]]
@@ -119,17 +120,19 @@ def plot_aggregation(results: dict, out_dir: str):
         bars = ax.bar(x, means, width=0.45, color=colors, alpha=0.85,
                       edgecolor="#ffffff22", zorder=3)
 
-        # Whisker per min-max
+        # Error bars ±1σ (deviazione standard) – indicatore statistico primario
+        ax.errorbar(x, means, yerr=stdevs,
+                    fmt="none", color="#ffffff", capsize=10, capthick=2,
+                    linewidth=2, zorder=5, label="±1σ (deviazione standard)")
+
+        # Linea per la mediana e P90 (indicatori secondari)
         for xi, mean, mn, mx, med, p90 in zip(x, means, mins_, maxs_, meds, p90s):
-            ax.errorbar(xi, mean, yerr=[[mean - mn], [mx - mean]],
-                        fmt="none", color="#e0e0e0", capsize=8,
-                        capthick=1.5, linewidth=1.5, zorder=4)
             # Linea per la mediana
             ax.plot([xi - 0.22, xi + 0.22], [med, med],
-                    color="#ffffff", linewidth=2, zorder=5, linestyle="-")
+                    color="#ffffff", linewidth=2, zorder=6, linestyle="-")
             # Linea per P90
             ax.plot([xi - 0.15, xi + 0.15], [p90, p90],
-                    color="#e74c3c", linewidth=1.5, zorder=5,
+                    color="#e74c3c", linewidth=1.5, zorder=6,
                     linestyle="--", alpha=0.8)
 
         # Annotazioni valore media
@@ -146,6 +149,8 @@ def plot_aggregation(results: dict, out_dir: str):
         legend_items = [
             mpatches.Patch(color=COLOR_NEO4J, label="Neo4j (MATCH su nodi sparsi)"),
             mpatches.Patch(color=COLOR_PG,    label="PostgreSQL (Sequential Scan)"),
+            plt.Line2D([0], [0], color="#ffffff", linewidth=2.5,
+                       solid_capstyle="round", label="±1σ (barre di errore)"),
             plt.Line2D([0], [0], color="#ffffff", linewidth=2, label="Mediana"),
             plt.Line2D([0], [0], color="#e74c3c", linewidth=1.5,
                        linestyle="--", label="P90"),
@@ -156,7 +161,8 @@ def plot_aggregation(results: dict, out_dir: str):
         ax.set_xticklabels(labels, fontsize=12)
         ax.set_ylabel("Latenza (ms)", fontsize=11)
         ax.set_title(
-            "Aggregazione Globale",
+            f"Aggregazione Globale: Neo4j vs PostgreSQL\n"
+            f"PostgreSQL {speedup}× più veloce  |  Barre di errore = ±1σ",
             fontsize=12, fontweight="bold", color="#ffffff", pad=14
         )
         ax.grid(axis="y", zorder=0)
@@ -203,7 +209,7 @@ def plot_bulk_insert(results: dict, out_dir: str):
 
         # ---- Subplot A: Throughput (record/s) ----
         ax1 = axes[0]
-        labels = ["Neo4j", "PostgreSQL"]
+        labels = ["Neo4j\n(UNWIND batch)", "PostgreSQL\n(COPY)"]
         tps_vals = [neo4j_tps, pg_tps]
         colors   = [COLOR_NEO4J, COLOR_PG]
 
@@ -262,6 +268,18 @@ def plot_bulk_insert(results: dict, out_dir: str):
         )
         ax2.grid(axis="y", zorder=0)
         ax2.set_axisbelow(True)
+
+        fig.suptitle(
+            "Test 4.2 – Bulk Insert (Ingestione Online OLTP)",
+            fontsize=13, fontweight="bold", y=1.02, color="#ffffff"
+        )
+        
+        fig.text(
+            0.02, -0.02,
+            "Nota metodologica: questo test valuta l'ingestione transazionale online via driver. "
+            "Per import batch offline, Neo4j dispone di strumenti dedicati (neo4j-admin import) molto più veloci di UNWIND.",
+            fontsize=8, color="#888888", ha="left"
+        )
 
         fig.tight_layout()
         out_path = os.path.join(out_dir, "bulk_insert_plot.svg")

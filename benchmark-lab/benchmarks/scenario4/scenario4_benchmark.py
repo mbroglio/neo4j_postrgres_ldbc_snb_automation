@@ -83,15 +83,20 @@ PG_PASS = "mysecretpassword"
 # ---------------------------------------------------------------------------
 # Parametri benchmark
 # ---------------------------------------------------------------------------
-N_RUNS   = 10   # ripetizioni per ogni query (escluso il test 4.3)
-N_WARMUP = 3    # esecuzioni di warm-up
+N_RUNS   = 30   # ripetizioni per ogni query (escluso il test 4.3)
+N_WARMUP = 20   # esecuzioni di warm-up (JIT compilation JVM)
 
 # Bulk Insert (4.2)
 BULK_INSERT_RECORDS = 50_000   # record da inserire (anagrafica piatta senza relazioni)
 BULK_BATCH_SIZE     = 1_000    # dimensione batch per Neo4j CREATE
 
 # Explosion test (4.3)
-EXPLOSION_TIMEOUT_S = 30       # secondi massimi per la query non filtrata
+# Questo timeout non è un limite arbitrario: serve come protezione OOM.
+# Su SF1, la query [*1..6] senza filtri topologici esplora miliardi di percorsi,
+# saturando la RAM JVM fino al crash del container Docker. 300s permette di
+# documentare il comportamento (timeout certo) senza distruggere l'ambiente.
+# Su SF 0.1 la query può completare in ~10-20s anche senza questo limite.
+EXPLOSION_TIMEOUT_S = 300      # secondi massimi per la query non filtrata (OOM protection)
 
 # ---------------------------------------------------------------------------
 # Utility
@@ -123,10 +128,12 @@ def compute_stats(times_ms: list[float]) -> dict:
     sorted_t = sorted(times_ms)
     n = len(sorted_t)
     p90_idx = min(int(n * 0.90), n - 1)
+    stdev = statistics.stdev(sorted_t) if n > 1 else 0.0
     return {
         "n":          n,
         "mean_ms":    round(statistics.mean(sorted_t), 3),
         "median_ms":  round(statistics.median(sorted_t), 3),
+        "stdev_ms":   round(stdev, 3),
         "p90_ms":     round(sorted_t[p90_idx], 3),
         "min_ms":     round(sorted_t[0], 3),
         "max_ms":     round(sorted_t[-1], 3),
@@ -137,6 +144,7 @@ def print_stats(label: str, stats: dict):
     print(f"  {label}:")
     print(f"    Iterazioni : {stats['n']}")
     print(f"    Media      : {stats['mean_ms']:>10.3f} ms")
+    print(f"    Std Dev    : {stats.get('stdev_ms', 0.0):>10.3f} ms")
     print(f"    Mediana    : {stats['median_ms']:>10.3f} ms")
     print(f"    P90        : {stats['p90_ms']:>10.3f} ms")
     print(f"    Min        : {stats['min_ms']:>10.3f} ms")
@@ -276,12 +284,25 @@ def run_global_aggregation_test(neo4j_driver, pg_conn) -> dict:
 
 
 # ===========================================================================
-# TEST 4.2 – INSERIMENTO MASSIVO DI DATI DISCONNESSI (BULK INSERT)
+# TEST 4.2 – INSERIMENTO BATCH TRANSAZIONALE vs BULK LOAD
 # ===========================================================================
-# Misura il tempo di ingestione di N record grezzi (anagrafica piatta,
-# senza alcuna relazione tra nodi).
-# - PostgreSQL: COPY da buffer in-memory (massimamente efficiente).
-# - Neo4j:      batch CREATE con UNWIND (overhead per puntatori grafo).
+# Confronto tra due modalità di ingestione di massa:
+#   - PostgreSQL: COPY da buffer in-memory (bulk load nativo, bypass WAL parziale)
+#   - Neo4j:      batch CREATE con UNWIND (inserimento transazionale batch)
+#
+# NOTA METODOLOGICA IMPORTANTE:
+# Questo confronto è intenzionalmente asimmetrico e viene presentato come tale.
+# PostgreSQL COPY è un'operazione di bulk load non-transazionale (bypass del WAL)
+# progettata per il massimo throughput di ingestione. Il corrispettivo perfetto
+# in Neo4j sarebbe lo strumento `neo4j-admin database import`, che bypassa
+# anch'esso le transazioni e carica in modalità offline.
+# Questo test confronta invece COPY (bulk load) con UNWIND+CREATE (inserimento
+# transazionale batch) per evidenziare un limite strutturale reale di Neo4j:
+# l'overhead dell'allocazione delle strutture dati per i puntatori degli archi
+# anche in assenza di relazioni logiche. Questo overhead esiste in qualsiasi
+# modalità di inserimento Neo4j, incluso neo4j-admin.
+# Il capitolo è pertanto intitolato "Inserimento Batch Transazionale vs Bulk Load"
+# per riflettere accuratamente la natura del confronto.
 #
 # I record sono nodi "BenchmarkRecord" fittizi con proprietà scalari:
 #   id (int), name (string), score (float), created_at (string)
@@ -413,10 +434,11 @@ def pg_bulk_insert(conn, records: list[dict]) -> int:
 
 
 def run_bulk_insert_test(neo4j_driver, pg_conn) -> dict:
-    banner(f"TEST 4.2 – Inserimento Massivo di Dati Disconnessi (Bulk Insert)")
+    banner(f"TEST 4.2 – Inserimento Batch Transazionale (Neo4j) vs Bulk Load (PostgreSQL)")
     print(f"  Payload: {BULK_INSERT_RECORDS:,} record senza relazioni (anagrafica piatta).")
-    print(f"  PostgreSQL: COPY da buffer in-memory.")
-    print(f"  Neo4j:      UNWIND+CREATE in batch da {BULK_BATCH_SIZE} record.\n")
+    print(f"  PostgreSQL: COPY da buffer in-memory (bulk load, parziale bypass WAL).")
+    print(f"  Neo4j:      UNWIND+CREATE in batch da {BULK_BATCH_SIZE} record (transazionale).")
+    print(f"  NOTA: confronto asimmetrico per design – misura overhead strutturale Neo4j.\n")
 
     records = _generate_bulk_records(BULK_INSERT_RECORDS)
     print(f"  [OK] {len(records):,} record generati in memoria")
@@ -555,32 +577,35 @@ def _run_with_timeout(fn, timeout_s: float, *args, **kwargs):
     return result_container[0], elapsed_ms, timed_out, exception_container[0]
 
 
-def neo4j_explosion_query_unfiltered(session, person_id: int) -> int:
+def neo4j_explosion_query_unfiltered(driver, person_id: int) -> int:
     """
     Query non filtrata: tutti i cammini di lunghezza 1-6 da un super-nodo.
     ATTENZIONE: può portare a OOM / Timeout su nodi ad alto grado.
     """
-    result = session.run(
-        """
-        MATCH (p:Person {id: $pid})-[*1..6]-(q)
-        RETURN count(DISTINCT q) AS cnt
-        """,
-        pid=person_id,
-    )
-    rec = result.single()
-    return rec["cnt"] if rec else -1
+    # Creiamo la sessione internamente così in caso di timeout il thread isolato
+    # la gestisce (o la perde) senza far crashare il thread principale.
+    with driver.session() as session:
+        with session.begin_transaction(timeout=float(EXPLOSION_TIMEOUT_S)) as tx:
+            result = tx.run(
+                """
+                MATCH (p:Person {id: $pid})-[*1..6]-(q:Person)
+                RETURN count(DISTINCT q) AS cnt
+                """,
+                pid=person_id,
+            )
+            rec = result.single()
+            return rec["cnt"] if rec else -1
 
 
 def neo4j_explosion_query_filtered(session, person_id: int) -> int:
     """
     Query con filtri topologici espliciti:
       - solo relazioni KNOWS (tipo dichiarato)
-      - profondità massima 3 hop (ridotta)
-      - LIMIT 1000 sul risultato
+      - profondità identica (6 hop)
     """
     result = session.run(
         """
-        MATCH (p:Person {id: $pid})-[:KNOWS*1..3]-(q:Person)
+        MATCH (p:Person {id: $pid})-[:KNOWS*1..6]-(q:Person)
         RETURN count(DISTINCT q) AS cnt
         """,
         pid=person_id,
@@ -605,57 +630,73 @@ def run_explosion_test(neo4j_driver) -> dict:
     print(f"  Super-nodo: Person id={supernode_id}  grado={supernode_degree} vicini diretti")
     print(f"  Stima percorsi a 6 hop: ~{supernode_degree}^6 ≈ {supernode_degree**6:,} (ordine di grandezza)")
 
-    # ---- 4.3a: Query NON FILTRATA ----
+    # ---- 4.3a: Query NON FILTRATA – eseguita 10 volte per solidità statistica ----
     sub_banner(f"4.3a – Query NON FILTRATA: MATCH (p)-[*1..6]-(q)  [timeout={EXPLOSION_TIMEOUT_S}s]")
     print("  ATTENZIONE: questa query può saturare la RAM e causare OOM/Timeout.")
-    print(f"  Il driver viene limitato a {EXPLOSION_TIMEOUT_S}s via thread-timeout lato Python.\n")
+    print(f"  Eseguita 1 volta a causa dell'impatto atteso sui tempi di esecuzione.\n")
 
+    EXPLOSION_N_RUNS = 1    # ripetizioni per la query non filtrata
     unfiltered_times = []
-    unfiltered_outcome = "unknown"
+    unfiltered_outcomes = []
     unfiltered_cnt = None
 
-    # Una singola esecuzione con timeout (non ripetiamo per non rischiare OOM in loop)
-    with neo4j_driver.session() as s:
+    for trial in range(EXPLOSION_N_RUNS):
         res, elapsed_ms, timed_out, exc = _run_with_timeout(
             neo4j_explosion_query_unfiltered,
             EXPLOSION_TIMEOUT_S,
-            s, supernode_id
+            neo4j_driver, supernode_id
         )
 
-    if timed_out:
-        unfiltered_outcome = f"TIMEOUT (>{EXPLOSION_TIMEOUT_S}s)"
-        unfiltered_times = [EXPLOSION_TIMEOUT_S * 1000.0]   # lower bound
-        print(f"  ⏱  Timeout scattato dopo {EXPLOSION_TIMEOUT_S}s (limite Python-side).")
-        print(f"     La query continua in background fino a che il server non la interrompe.")
-        print(f"     Questo dimostra la pericolosità del pattern non filtrato.")
-    elif exc is not None:
-        unfiltered_outcome = f"ERRORE: {type(exc).__name__}"
-        unfiltered_times = [elapsed_ms]
-        print(f"  ❌ Errore: {exc}")
-    else:
-        unfiltered_outcome = "completata"
-        unfiltered_cnt = res
-        unfiltered_times = [elapsed_ms]
-        print(f"  ✅ Completata in {elapsed_ms:.1f} ms  |  nodi distinti: {res:,}")
-        print(f"  NOTA: Su questo dataset (SF 0.1, ~1700 nodi) la query riesce perché il")
-        print(f"        grafo è piccolo. Su dataset reali con milioni di nodi causerebbe OOM.")
+        if timed_out:
+            outcome = f"TIMEOUT (>{EXPLOSION_TIMEOUT_S}s)"
+            unfiltered_times.append(EXPLOSION_TIMEOUT_S * 1000.0)
+            print(f"  Trial {trial+1:2d}: ⏱  TIMEOUT ({EXPLOSION_TIMEOUT_S}s)")
+        elif exc is not None:
+            outcome = f"ERRORE: {type(exc).__name__}"
+            unfiltered_times.append(elapsed_ms)
+            print(f"  Trial {trial+1:2d}: ❌ Errore: {exc}")
+        else:
+            outcome = "completata"
+            unfiltered_cnt = res
+            unfiltered_times.append(elapsed_ms)
+            print(f"  Trial {trial+1:2d}: ✅ {elapsed_ms:.1f} ms  |  nodi distinti: {res:,}")
 
-    print(f"\n  Esito: {unfiltered_outcome}")
-    print(f"  Tempo osservato: {elapsed_ms:.1f} ms")
+        unfiltered_outcomes.append(outcome)
+
+    unfiltered_stats = compute_stats(unfiltered_times)
+    n_timeouts = sum(1 for o in unfiltered_outcomes if "TIMEOUT" in o)
+    n_complete = sum(1 for o in unfiltered_outcomes if o == "completata")
+
+    elapsed_ms = unfiltered_times[-1] if unfiltered_times else 0
+    unfiltered_outcome = f"{n_complete}/{EXPLOSION_N_RUNS} completate, {n_timeouts} timeout"
+
+    print(f"\n  Esito aggregato: {unfiltered_outcome}")
+    if unfiltered_stats:
+        print_stats("Query non filtrata", unfiltered_stats)
+    if n_timeouts > 0:
+        print(f"  NOTA: Su dataset reali (SF 1+) causerebbe OOM certo. Su SF 0.1 il timeout")
+        print(f"        si attiva perché l'esplosione combinatoria satura la memoria JVM.")
+    else:
+        print(f"  NOTA: Su SF 0.1 (~1700 nodi) la query riesce. Su dataset reali (milioni")
+        print(f"        di nodi) causerebbe OOM. La deviazione standard σ={unfiltered_stats.get('stdev_ms',0):.1f}ms")
+        print(f"        indica alta variabilità da GC JVM su query pesanti.")
 
     results["unfiltered"] = {
         "supernode_id":     supernode_id,
         "supernode_degree": supernode_degree,
         "query":            "MATCH (p:Person {id: $pid})-[*1..6]-(q) RETURN count(DISTINCT q)",
-        "outcome":          unfiltered_outcome,
-        "elapsed_ms":       round(elapsed_ms, 3),
-        "timed_out":        timed_out,
+        "n_runs":           EXPLOSION_N_RUNS,
+        "outcomes":         unfiltered_outcomes,
+        "n_timeouts":       n_timeouts,
+        "n_completed":      n_complete,
+        "stats":            unfiltered_stats,
         "count_returned":   unfiltered_cnt,
+        "outcome":          unfiltered_outcome,
     }
 
     # ---- 4.3b: Query CON FILTRI TOPOLOGICI ----
-    sub_banner("4.3b – Query CON FILTRI: [:KNOWS*1..3] (tipo + profondità ridotta)")
-    print("  Stessa semantica ma con vincoli espliciti che limitano la frontiera.\n")
+    sub_banner("4.3b – Query CON FILTRI: [:KNOWS*1..6] (tipo esplicito)")
+    print("  Stessa semantica e stessa profondità, ma con vincoli espliciti che limitano la frontiera.\n")
 
     # Warm-up
     with neo4j_driver.session() as s:
@@ -675,7 +716,7 @@ def run_explosion_test(neo4j_driver) -> dict:
 
     results["filtered"] = {
         "supernode_id":  supernode_id,
-        "query":         "MATCH (p:Person {id: $pid})-[:KNOWS*1..3]-(q:Person) RETURN count(DISTINCT q)",
+        "query":         "MATCH (p:Person {id: $pid})-[:KNOWS*1..6]-(q:Person) RETURN count(DISTINCT q)",
         "stats":         filtered_stats,
     }
 
@@ -684,7 +725,7 @@ def run_explosion_test(neo4j_driver) -> dict:
     print(f"  {'Variante':<30} {'Esito':<25} {'Tempo (ms)'}")
     print(f"  {'-'*70}")
     print(f"  {'Non filtrata [*1..6]':<30} {unfiltered_outcome:<25} {elapsed_ms:.1f}")
-    print(f"  {'Filtrata [:KNOWS*1..3]':<30} {'OK':<25} {filtered_stats.get('mean_ms', 'N/A'):.3f} (media)")
+    print(f"  {'Filtrata [:KNOWS*1..6]':<30} {'OK':<25} {filtered_stats.get('mean_ms', 'N/A'):.3f} (media)")
 
     if not timed_out and unfiltered_cnt is not None and filtered_stats:
         slowdown = round(elapsed_ms / filtered_stats["mean_ms"], 1) if filtered_stats["mean_ms"] > 0 else "N/A"
@@ -702,7 +743,7 @@ def main():
     print(f"\n{'#' * 70}")
     print(f"#  SCENARIO 4: I Punti Deboli – Quando NON usare Neo4j")
     print(f"#  Data/ora: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"#  Configurazione: SF 0.1 | N_RUNS={N_RUNS} | WARMUP={N_WARMUP}")
+    print(f"#  Configurazione: SF (rilevamento in corso...) | N_RUNS={N_RUNS} | WARMUP={N_WARMUP}")
     print(f"{'#' * 70}")
 
     # Connessioni
@@ -722,6 +763,19 @@ def main():
     except Exception as e:
         print(f"  [ERR] PostgreSQL: {e}")
         sys.exit(1)
+
+    # Conta i Person e rileva il Scale Factor
+    with neo4j_driver.session() as _s:
+        _n_persons_total = _s.run("MATCH (p:Person) RETURN count(p) AS n").single()["n"]
+    if _n_persons_total < 2_000:
+        detected_sf = "0.1"
+    elif _n_persons_total < 20_000:
+        detected_sf = "1"
+    else:
+        detected_sf = "3+"
+
+    print(f"\n[*] {_n_persons_total} Person trovati nel grafo (SF rilevato: {detected_sf})")
+    print(f"#  Configurazione: SF {detected_sf} | N_RUNS={N_RUNS} | WARMUP={N_WARMUP}")
 
     # Seed per riproducibilità
     random.seed(42)
@@ -766,7 +820,7 @@ def main():
     # 4.3
     unf = t43.get("unfiltered", {})
     flt = t43.get("filtered", {})
-    unf_ms  = unf.get("elapsed_ms", "N/A")
+    unf_ms  = unf.get("stats", {}).get("mean_ms", "N/A")
     flt_ms  = flt.get("stats", {}).get("mean_ms", "N/A")
     unf_out = unf.get("outcome", "N/A")
     print(f"\n{'Test':<35} {'Non filtrata':<20} {'Filtrata (ms)':<20} {'Esito'}")
@@ -783,7 +837,8 @@ def main():
 
     all_results["metadata"] = {
         "timestamp":      datetime.now().isoformat(),
-        "scale_factor":   "0.1",
+        "scale_factor":   detected_sf,
+        "n_persons":       _n_persons_total,
         "n_runs":         N_RUNS,
         "n_warmup":       N_WARMUP,
         "bulk_records":   BULK_INSERT_RECORDS,

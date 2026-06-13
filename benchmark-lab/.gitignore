@@ -1,4 +1,5 @@
 infrastructure/ldbc_snb_interactive_impls
 infrastructure/out-sf*
 infrastructure/data/
+benchmarks/chapters/
 __pycache__/

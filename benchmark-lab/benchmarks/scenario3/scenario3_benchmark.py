@@ -106,13 +106,28 @@ LEADER_CONTAINER_NAME = None   # popolato da detect_cluster_roles()
 # ---------------------------------------------------------------------------
 # Parametri benchmark
 # ---------------------------------------------------------------------------
-N_RUNS          = 30    # cicli di lettura per le statistiche 3.3
-N_WARMUP        = 5     # warm-up connessioni
+N_RUNS          = 5000  # letture per verifica Causal Consistency (solidità statistica)
+N_WARMUP        = 15    # warm-up connessioni
 WRITE_THREADS   = 4     # thread scrittori durante il fault tolerance (3.2)
 WRITE_DURATION  = 15.0  # secondi di scrittura continua prima dello stop
 POST_STOP_MAX   = 60.0  # attesa massima per la rielezione (secondi)
 READ_THREADS    = 16    # thread lettori per il test di scalabilità (3.3)
 READ_DURATION   = 20.0  # secondi di carico di lettura (3.3)
+
+# ---------------------------------------------------------------------------
+# NOTA INFRASTRUTTURALE - Latenze Docker (importante per interpretare i dati)
+# ---------------------------------------------------------------------------
+# In ambienti Docker su singolo host, le latenze di rete osservate possono
+# essere anomale rispetto a un cluster reale. In particolare:
+#   - Un nodo può rispondere a 6ms, gli altri a 1400ms: questo indica
+#     che la rete virtuale Docker (bridge) sta "strozzando" i pacchetti,
+#     oppure che i container lottano per la CPU (frequente senza limiti CPU).
+#   - SOLUZIONE: tutti i container sono sulla stessa docker network bridge
+#     e ciascuno ha un limite di CPU esplicito (--cpus="1.5").
+#   - Se le latenze anomale persistono, questo viene dichiarato come limite
+#     infrastrutturale nella tesi: i tempi di rielezione Raft misurati
+#     includono l'overhead della virtualizzazione Docker e non sono
+#     rappresentativi di un cluster bare-metal.
 
 # ---------------------------------------------------------------------------
 # Utility
@@ -320,30 +335,74 @@ class WriterWorker:
 
 def stop_leader_container(container_name: str) -> float:
     """
-    Ferma brutalmente il container Docker del leader.
-    Restituisce il timestamp assoluto in cui lo stop è avvenuto.
+    Esegue una PARTIZIONE DI RETE sul container Docker del leader:
+    disconnette il container dalla rete Docker senza spegnerlo.
+    Questo è l'approccio corretto per testare il Teorema CAP (profilo CP):
+      - Il leader è ACCESO ma ISOLATO dagli altri nodi
+      - I follower non ricevono heartbeat → avviano elezione Raft
+      - Il leader isolato non raggiunge il quorum → non può committare
+      - Nessun split-brain: il sistema va in CP (Consistency over Availability)
+
+    NOTA: se il container usa più reti Docker, vengono disconnesse tutte.
+    Restituisce il timestamp assoluto in cui la partizione è iniziata.
     """
     if not DOCKER_AVAILABLE:
         raise RuntimeError("Docker SDK non disponibile. Installa: pip install docker")
     client = docker_sdk.from_env()
-    t_stop = time.time()
+    t_partition = time.time()
     container = client.containers.get(container_name)
-    container.stop(timeout=0)   # SIGKILL immediato (simula crash hardware)
-    print(f"  [STOP] Container '{container_name}' fermato a t={t_stop:.3f}")
-    return t_stop
+
+    # Disconnette il container da tutte le sue reti Docker
+    partitioned_networks = []
+    for net_name, net_info in container.attrs.get("NetworkSettings", {}).get("Networks", {}).items():
+        try:
+            network = client.networks.get(net_name)
+            network.disconnect(container)
+            partitioned_networks.append(net_name)
+            print(f"  [PARTITION] Container '{container_name}' disconnesso dalla rete '{net_name}'")
+        except Exception as e:
+            print(f"  [WARN] Impossibile disconnettere da '{net_name}': {e}")
+            # Fallback: SIGKILL se la disconnessione di rete fallisce
+            container.stop(timeout=0)
+            print(f"  [FALLBACK] Container '{container_name}' fermato via SIGKILL")
+
+    if not partitioned_networks:
+        # Nessuna rete trovata, usa SIGKILL come fallback
+        container.stop(timeout=0)
+        print(f"  [FALLBACK] Container '{container_name}' fermato via SIGKILL (nessuna rete trovata)")
+
+    print(f"  [PARTITION] Partizione di rete attivata a t={t_partition:.3f}")
+    print(f"  [PARTITION] Leader '{container_name}' isolato ma ancora in esecuzione")
+    print(f"  [PARTITION] I follower avvieranno elezione Raft dopo heartbeat timeout")
+
+    # Salva le reti partizionate per il ripristino
+    stop_leader_container._partitioned_networks = {container_name: partitioned_networks}
+    return t_partition
 
 
 def restart_leader_container(container_name: str):
-    """Riavvia il container del leader precedente (cleanup post-test)."""
+    """Ripristina la connettività di rete del container precedentemente partizionato."""
     if not DOCKER_AVAILABLE:
         return
     client = docker_sdk.from_env()
     try:
         container = client.containers.get(container_name)
-        container.start()
-        print(f"  [START] Container '{container_name}' riavviato.")
+        # Riconnette il container alle reti da cui era stato disconnesso
+        partitioned = getattr(stop_leader_container, '_partitioned_networks', {}).get(container_name, [])
+        if partitioned:
+            for net_name in partitioned:
+                try:
+                    network = client.networks.get(net_name)
+                    network.connect(container)
+                    print(f"  [RESTORE] Container '{container_name}' riconnesso alla rete '{net_name}'")
+                except Exception as e:
+                    print(f"  [WARN] Impossibile riconnettere a '{net_name}': {e}")
+        else:
+            # Fallback: riavvia il container se era stato fermato via SIGKILL
+            container.start()
+            print(f"  [START] Container '{container_name}' riavviato (fallback SIGKILL).")
     except Exception as e:
-        print(f"  [WARN] Impossibile riavviare '{container_name}': {e}")
+        print(f"  [WARN] Impossibile ripristinare '{container_name}': {e}")
 
 
 def measure_failover(driver, t_crash: float, max_wait: float = POST_STOP_MAX) -> dict:
@@ -490,14 +549,25 @@ def run_fault_tolerance_test(driver, person_ids: list[int]) -> dict:
 
     print(f"\n  Scritture totali registrate   : {total_writes}")
     print(f"  Successi                       : {success_writes}")
-    print(f"  Errori (Lost Writes)           : {failed_writes}")
+    print(f"  Errori (scritture rifiutate)   : {failed_writes}")
+    if failed_writes > 0:
+        print(f"  [NOTA] Le {failed_writes} scritture fallite NON implicano corruzione dei dati.")
+        print(f"         Il client Python riceve un'eccezione SessionExpired o NotALeader")
+        print(f"         durante la finestra di rielezione Raft. In un'architettura")
+        print(f"         produttiva reale, il driver ufficiale Neo4j (neo4j-driver-python)")
+        print(f"         ritenta automaticamente la transazione con `session.execute_write()`,")
+        print(f"         funzione che implementa la retry policy integrata. Nessun dato")
+        print(f"         viene corrotto: il cluster mantiene il profilo CP del CAP theorem.")
     if t_first_failure_ms is not None:
-        print(f"  Primo errore post-crash (ms)   : {t_first_failure_ms:.1f} ms")
+        print(f"  Primo errore post-partizione (ms) : {t_first_failure_ms:.1f} ms")
     if failover["downtime_ms"] is not None:
         print(f"  Downtime totale scritture (ms) : {failover['downtime_ms']:.1f} ms  "
               f"({failover['t_recovery_s']:.2f}s)")
         print(f"  Profilo CAP validato           : CP ✅  "
-              f"(indisponibilità accettata per preservare consistenza)")
+              f"(indisponibilità temporanea per preservare consistenza)")
+        print(f"  NOTA CAP: con partizione di rete (non SIGKILL), il leader isolato")
+        print(f"            è ancora acceso ma non può committare (no quorum). I follower")
+        print(f"            eleggono un nuovo leader. Questo dimostra CP: no split-brain.")
               
     read_records = downtime_reader.records
     read_total = len(read_records)
@@ -703,8 +773,9 @@ def run_read_scalability_test(driver, person_ids: list[int]) -> dict:
     else:
         print(f"  [WARN] Bookmark non disponibile, test senza Causal Consistency forzata.")
 
-    cc_result = verify_causal_consistency(driver, person_ids, bookmark, marker_val, n_checks=30)
-    print(f"\n  Letture con Causal Consistency:")
+    cc_result = verify_causal_consistency(driver, person_ids, bookmark, marker_val,
+                                           n_checks=N_RUNS)
+    print(f"\n  Letture con Causal Consistency ({N_RUNS} campioni):")
     print(f"    Letture corrette (valore aggiornato)  : {cc_result['correct_reads']} / {cc_result['n_checks']}")
     print(f"    Stale read osservate                  : {cc_result['stale_reads']}  "
           f"{'✅ (atteso: 0)' if cc_result['stale_reads'] == 0 else '⚠️ Stale reads rilevate!'}")
@@ -817,7 +888,16 @@ def main():
     with driver.session() as s:
         res = s.run("MATCH (p:Person) RETURN p.id AS id ORDER BY p.id")
         person_ids = [r["id"] for r in res]
-    print(f"\n[*] {len(person_ids)} Person nel grafo (SF 0.1)")
+        
+    _n_persons_total = len(person_ids)
+    if _n_persons_total < 2_000:
+        detected_sf = "0.1"
+    elif _n_persons_total < 20_000:
+        detected_sf = "1"
+    else:
+        detected_sf = "3+"
+
+    print(f"\n[*] {_n_persons_total} Person nel grafo (SF rilevato: {detected_sf})")
 
     if not person_ids:
         print("  [ERR] Nessun nodo Person trovato. Il dataset è caricato nel cluster?")
@@ -915,7 +995,7 @@ def main():
 
     all_results["metadata"] = {
         "timestamp":     datetime.now().isoformat(),
-        "scale_factor":  "0.1",
+        "scale_factor":  detected_sf,
         "cluster_uri":   CLUSTER_URI,
         "n_warmup":      N_WARMUP,
         "write_threads": WRITE_THREADS,

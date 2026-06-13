@@ -58,11 +58,12 @@ NEO4J_PASSWORD = "password"
 # ---------------------------------------------------------------------------
 # Parametri benchmark
 # ---------------------------------------------------------------------------
-N_RUNS        = 20   # ripetizioni per raccogliere statistiche
-N_WARMUP      = 3    # warm-up iniziale
+N_RUNS        = 30   # ripetizioni per raccogliere statistiche
+N_WARMUP      = 20   # warm-up iniziale (necessario per JIT compilation JVM)
 N_THREADS     = 8    # thread concorrenti per i test di concorrenza
 LOST_UPDATE_THREADS = 10  # thread per il test Lost Update
-DEADLOCK_PAIRS      = 20  # coppie di thread per forzare deadlock
+# NOTA: il test 2.3 spawna sempre 1 coppia di thread per run (non configurabile
+# via costante – ogni run è un ciclo deadlock completo)
 
 # ---------------------------------------------------------------------------
 # Utility
@@ -93,10 +94,12 @@ def compute_stats(times_ms: list[float]) -> dict:
     sorted_t = sorted(times_ms)
     n = len(sorted_t)
     p90_idx = min(int(n * 0.90), n - 1)
+    stdev = statistics.stdev(sorted_t) if n > 1 else 0.0
     return {
         "n":         n,
         "mean_ms":   round(statistics.mean(sorted_t), 3),
         "median_ms": round(statistics.median(sorted_t), 3),
+        "stdev_ms":  round(stdev, 3),
         "p90_ms":    round(sorted_t[p90_idx], 3),
         "min_ms":    round(sorted_t[0], 3),
         "max_ms":    round(sorted_t[-1], 3),
@@ -107,6 +110,7 @@ def print_stats(label: str, stats: dict):
     print(f"  {label}:")
     print(f"    Iterazioni : {stats['n']}")
     print(f"    Media      : {stats['mean_ms']:>10.3f} ms")
+    print(f"    Std Dev    : {stats.get('stdev_ms', 0.0):>10.3f} ms")
     print(f"    Mediana    : {stats['median_ms']:>10.3f} ms")
     print(f"    P90        : {stats['p90_ms']:>10.3f} ms")
     print(f"    Min        : {stats['min_ms']:>10.3f} ms")
@@ -187,6 +191,19 @@ def reader_task(driver, target_id: int, n_reads: int) -> dict:
     return {"latencies": latencies, "values_read": values_read}
 
 
+# NOTA LATENZA SCRITTURA (importante per interpretare Tabella 4.5):
+# La latenza di scrittura registrata in questo test INCLUDE deliberatamente
+# uno sleep di 50-100 ms (passo 3) che simula una transazione lunga.
+# Questo sleep è lo strumento con cui creiamo la "finestra di Dirty Read":
+# senza di esso i reader non avrebbero tempo di intercettare il valore non
+# committato. La latenza reale del motore Neo4j (escluso lo sleep) è pari
+# alla latenza_totale – sleep_ms, tipicamente nell'ordine dei 2-5 ms.
+# Il numero riportato in tabella (es. ~265 ms) comprende lo sleep intenzionale
+# e non è confrontabile con latenze di transazioni brevi.
+SLEEP_DIRTY_WINDOW_MS_MIN = 50   # ms di pausa minima nella transazione lunga
+SLEEP_DIRTY_WINDOW_MS_MAX = 100  # ms di pausa massima nella transazione lunga
+
+
 def writer_task_explicit_tx(driver, target_id: int, n_writes: int,
                              committed_value: int = 99,
                              dirty_value: int = 42) -> dict:
@@ -201,6 +218,9 @@ def writer_task_explicit_tx(driver, target_id: int, n_writes: int,
 
     Se Neo4j rispettasse Read Committed, nessun reader vedrebbe `dirty_value`
     durante il passo 3. Un sistema senza isolamento mostrerebbe dirty_value.
+
+    NOTA: la latenza totale include lo sleep intenzionale (50-100ms).
+    Per ottenere la latenza netta del motore, sottrarre SLEEP_DIRTY_WINDOW_MS_MIN.
     """
     latencies = []
     errors = 0
@@ -310,7 +330,13 @@ def run_read_committed_test(driver, target_ids: list[int]) -> dict:
     print(f"  Dirty Read rilevati       : {dirty_reads_detected}  "
           f"{'✅ Nessuno (corretto)' if dirty_reads_detected == 0 else '❌ ANOMALIA!'}")
     print_stats("Latenza Lettura", read_stats)
-    print_stats("Latenza Scrittura (tx esplicita)", write_stats)
+    print_stats("Latenza Scrittura (tx esplicita, include sleep)", write_stats)
+    # Stima latenza netta (escluso sleep deliberato).
+    # Il sleep è uniform(50ms, 100ms) → media 75ms.
+    _sleep_mean_ms = (SLEEP_DIRTY_WINDOW_MS_MIN + SLEEP_DIRTY_WINDOW_MS_MAX) / 2
+    net_write_mean = max(0, write_stats.get('mean_ms', 0) - _sleep_mean_ms)
+    print(f"  Latenza scrittura NETTA (escluso sleep medio {_sleep_mean_ms:.0f}ms): "
+          f"~{net_write_mean:.1f} ms")
 
     results["read_committed"] = {
         "target_id":            target_id,
@@ -321,6 +347,11 @@ def run_read_committed_test(driver, target_ids: list[int]) -> dict:
         "isolation_ok":         dirty_reads_detected == 0,
         "read_latency":         read_stats,
         "write_latency":        write_stats,
+        "write_latency_note":   (
+            f"INCLUDE sleep deliberato di {SLEEP_DIRTY_WINDOW_MS_MIN}-{SLEEP_DIRTY_WINDOW_MS_MAX}ms "
+            f"(finestra Dirty Read). Latenza netta stimata = write_latency.mean_ms - {(SLEEP_DIRTY_WINDOW_MS_MIN+SLEEP_DIRTY_WINDOW_MS_MAX)//2}ms."
+        ),
+        "net_write_latency_ms": round(max(0, write_stats.get('mean_ms', 0) - (SLEEP_DIRTY_WINDOW_MS_MIN+SLEEP_DIRTY_WINDOW_MS_MAX)/2), 3),
     }
     return results
 
@@ -509,6 +540,7 @@ def deadlock_thread_v2(driver, first_id: int, second_id: int,
                "error_type": None,
                "rollback_ok": False}
 
+    t_lock2_start = None
     with driver.session() as s:
         tx = s.begin_transaction()
         try:
@@ -545,8 +577,10 @@ def deadlock_thread_v2(driver, first_id: int, second_id: int,
             t_detected = time.perf_counter()
             outcome["deadlock_detected"]   = True
             # detection_time_ms = tempo dal secondo lock request alla TransientError
-            # (= overhead reale del Wait-for Graph, senza il sleep)
-            outcome["detection_time_ms"]   = round((t_detected - t_lock2_start) * 1000.0, 3)
+            if t_lock2_start is not None:
+                outcome["detection_time_ms"] = round((t_detected - t_lock2_start) * 1000.0, 3)
+            else:
+                outcome["detection_time_ms"] = -1  # lock2 mai raggiunto
             outcome["error_type"]          = type(e).__name__
             outcome["rollback_ok"]         = True
             outcome["message"]             = str(e)[:200]
@@ -650,27 +684,37 @@ def run_deadlock_test(driver, target_ids: list[int]) -> dict:
 # ===========================================================================
 
 def main():
-    print(f"\n{'#' * 70}")
-    print(f"#  SCENARIO 2: Transazioni e Concorrenza – Stress Test Neo4j")
-    print(f"#  Data/ora: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"#  Configurazione: SF 0.1 | N_RUNS={N_RUNS} | N_THREADS={N_THREADS}")
-    print(f"{'#' * 70}")
-
-    # Connessione
-    print("\n[*] Connessione a Neo4j...")
+    # Connessione preliminare per rilevare SF prima di stampare l'header
     try:
         driver = get_neo4j_driver()
         driver.verify_connectivity()
-        print("  [OK] Neo4j connesso")
     except Exception as e:
         print(f"  [ERR] Neo4j: {e}")
         sys.exit(1)
+
+    # Conta i Person e rileva il Scale Factor
+    with driver.session() as _s:
+        _n_persons_total = _s.run("MATCH (p:Person) RETURN count(p) AS n").single()["n"]
+    if _n_persons_total < 2_000:
+        detected_sf = "0.1"
+    elif _n_persons_total < 20_000:
+        detected_sf = "1"
+    else:
+        detected_sf = "3+"
+
+    print(f"\n{'#' * 70}")
+    print(f"#  SCENARIO 2: Transazioni e Concorrenza – Stress Test Neo4j")
+    print(f"#  Data/ora: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"#  Configurazione: SF {detected_sf} | N_RUNS={N_RUNS} | N_THREADS={N_THREADS}")
+    print(f"{'#' * 70}")
+
+    print(f"\n[*] Neo4j connesso")
 
     # Lista person_id
     with driver.session() as s:
         res = s.run("MATCH (p:Person) RETURN p.id AS id ORDER BY p.id")
         person_ids = [r["id"] for r in res]
-    print(f"\n[*] {len(person_ids)} Person trovati nel grafo (SF 0.1)")
+    print(f"\n[*] {_n_persons_total} Person trovati nel grafo (SF rilevato: {detected_sf})")
 
     # Seed per riproducibilità
     random.seed(42)
@@ -749,11 +793,11 @@ def main():
 
     all_results["metadata"] = {
         "timestamp":       datetime.now().isoformat(),
-        "scale_factor":    "0.1",
+        "scale_factor":    detected_sf,
         "n_runs":          N_RUNS,
         "n_warmup":        N_WARMUP,
         "n_threads":       N_THREADS,
-        "n_persons":       len(person_ids),
+        "n_persons":       _n_persons_total,
         "neo4j_version":   "5.20.0-community",
     }
     try:

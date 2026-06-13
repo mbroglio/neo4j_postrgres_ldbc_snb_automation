@@ -1,0 +1,325 @@
+{
+  "sampled_nodes": {
+    "low_degree": [
+      26388279066650,
+      1171,
+      24189255812502,
+      15393162788969,
+      35184372089170
+    ],
+    "mid_degree": [
+      19791209300541,
+      6597069767044,
+      21990232556387,
+      37383395345264,
+      8796093022945
+    ],
+    "high_degree": [
+      30786325578980,
+      4398046511181,
+      32985348834826,
+      10995116277819,
+      2199023256904
+    ],
+    "total_persons": 1700
+  },
+  "test_1_1_multihop": {
+    "hop_1": {
+      "person_id": 6597069767044,
+      "neo4j_result": 7,
+      "pg_result": 7,
+      "neo4j": {
+        "n": 50,
+        "mean_ms": 2.254,
+        "median_ms": 2.199,
+        "stdev_ms": 0.293,
+        "p90_ms": 2.665,
+        "min_ms": 1.77,
+        "max_ms": 3.004
+      },
+      "postgresql": {
+        "n": 50,
+        "mean_ms": 0.21,
+        "median_ms": 0.198,
+        "stdev_ms": 0.042,
+        "p90_ms": 0.241,
+        "min_ms": 0.188,
+        "max_ms": 0.466
+      },
+      "speedup_neo4j_vs_pg": 0.09
+    },
+    "hop_2": {
+      "person_id": 26388279066650,
+      "neo4j_result": 726,
+      "pg_result": 726,
+      "neo4j": {
+        "n": 50,
+        "mean_ms": 1.954,
+        "median_ms": 1.737,
+        "stdev_ms": 0.824,
+        "p90_ms": 2.557,
+        "min_ms": 1.402,
+        "max_ms": 7.02
+      },
+      "postgresql": {
+        "n": 50,
+        "mean_ms": 0.575,
+        "median_ms": 0.554,
+        "stdev_ms": 0.076,
+        "p90_ms": 0.598,
+        "min_ms": 0.536,
+        "max_ms": 1.038
+      },
+      "speedup_neo4j_vs_pg": 0.29
+    },
+    "hop_3": {
+      "person_id": 19791209300541,
+      "neo4j_result": 1521,
+      "pg_result": 1520,
+      "neo4j": {
+        "n": 50,
+        "mean_ms": 3.371,
+        "median_ms": 3.346,
+        "stdev_ms": 0.4,
+        "p90_ms": 3.679,
+        "min_ms": 2.771,
+        "max_ms": 5.375
+      },
+      "postgresql": {
+        "n": 50,
+        "mean_ms": 20.839,
+        "median_ms": 20.691,
+        "stdev_ms": 0.375,
+        "p90_ms": 21.463,
+        "min_ms": 20.483,
+        "max_ms": 22.212
+      },
+      "speedup_neo4j_vs_pg": 6.18
+    },
+    "hop_4": {
+      "person_id": 6597069767044,
+      "neo4j_result": 1538,
+      "pg_result": 1537,
+      "neo4j": {
+        "n": 50,
+        "mean_ms": 3.838,
+        "median_ms": 3.811,
+        "stdev_ms": 0.353,
+        "p90_ms": 4.178,
+        "min_ms": 3.284,
+        "max_ms": 5.462
+      },
+      "postgresql": {
+        "n": 50,
+        "mean_ms": 877.615,
+        "median_ms": 877.145,
+        "stdev_ms": 2.399,
+        "p90_ms": 881.046,
+        "min_ms": 873.4,
+        "max_ms": 884.694
+      },
+      "speedup_neo4j_vs_pg": 228.66
+    }
+  },
+  "test_1_2_triangle": {
+    "global_triangles": {
+      "neo4j_result": 33380,
+      "pg_result": 33380,
+      "neo4j": {
+        "n": 50,
+        "mean_ms": 777.518,
+        "median_ms": 744.129,
+        "stdev_ms": 65.72,
+        "p90_ms": 900.025,
+        "min_ms": 738.736,
+        "max_ms": 954.779
+      },
+      "postgresql": {
+        "n": 50,
+        "mean_ms": 46.374,
+        "median_ms": 46.248,
+        "stdev_ms": 0.451,
+        "p90_ms": 47.169,
+        "min_ms": 45.794,
+        "max_ms": 47.735
+      },
+      "speedup_neo4j_vs_pg": 0.06,
+      "methodological_note": "Cypher OLTP puro \u2013 con GDS (gds.triangleCount) Neo4j supera PostgreSQL"
+    },
+    "per_person_triangles": {
+      "person_id": 6597069767044,
+      "neo4j_result": 5,
+      "pg_result": 5,
+      "neo4j": {
+        "n": 50,
+        "mean_ms": 1.339,
+        "median_ms": 1.28,
+        "stdev_ms": 0.385,
+        "p90_ms": 1.845,
+        "min_ms": 0.932,
+        "max_ms": 2.541
+      },
+      "postgresql": {
+        "n": 50,
+        "mean_ms": 0.539,
+        "median_ms": 0.533,
+        "stdev_ms": 0.053,
+        "p90_ms": 0.545,
+        "min_ms": 0.508,
+        "max_ms": 0.899
+      },
+      "speedup_neo4j_vs_pg": 0.4
+    }
+  },
+  "test_1_3_shortest_path": {
+    "dist_1hop": {
+      "src": 4398046511348,
+      "dst": 15393162789253,
+      "actual_hops": 2,
+      "neo4j_result_hops": 2,
+      "pg_result_hops": 2,
+      "pg_timed_out": false,
+      "neo4j": {
+        "n": 50,
+        "mean_ms": 0.663,
+        "median_ms": 0.592,
+        "stdev_ms": 0.277,
+        "p90_ms": 0.795,
+        "min_ms": 0.536,
+        "max_ms": 2.419
+      },
+      "postgresql": {
+        "n": 50,
+        "mean_ms": 8.272,
+        "median_ms": 8.146,
+        "stdev_ms": 0.377,
+        "p90_ms": 8.594,
+        "min_ms": 8.045,
+        "max_ms": 10.503
+      },
+      "speedup_neo4j_vs_pg": 12.48
+    },
+    "dist_2hop": {
+      "src": 4398046511304,
+      "dst": 37383395344977,
+      "actual_hops": 2,
+      "neo4j_result_hops": 2,
+      "pg_result_hops": 2,
+      "pg_timed_out": false,
+      "neo4j": {
+        "n": 50,
+        "mean_ms": 0.664,
+        "median_ms": 0.608,
+        "stdev_ms": 0.194,
+        "p90_ms": 0.832,
+        "min_ms": 0.575,
+        "max_ms": 1.799
+      },
+      "postgresql": {
+        "n": 50,
+        "mean_ms": 10.32,
+        "median_ms": 10.27,
+        "stdev_ms": 0.284,
+        "p90_ms": 10.595,
+        "min_ms": 9.807,
+        "max_ms": 11.781
+      },
+      "speedup_neo4j_vs_pg": 15.54
+    },
+    "dist_3hop": {
+      "src": 37383395345914,
+      "dst": 10995116279261,
+      "actual_hops": 3,
+      "neo4j_result_hops": 3,
+      "pg_result_hops": 3,
+      "pg_timed_out": false,
+      "neo4j": {
+        "n": 50,
+        "mean_ms": 0.814,
+        "median_ms": 0.697,
+        "stdev_ms": 0.287,
+        "p90_ms": 1.251,
+        "min_ms": 0.605,
+        "max_ms": 1.968
+      },
+      "postgresql": {
+        "n": 50,
+        "mean_ms": 16.523,
+        "median_ms": 16.088,
+        "stdev_ms": 1.007,
+        "p90_ms": 18.46,
+        "min_ms": 15.966,
+        "max_ms": 20.373
+      },
+      "speedup_neo4j_vs_pg": 20.3
+    },
+    "dist_4hop": {
+      "src": 30786325577944,
+      "dst": 8796093022910,
+      "actual_hops": 4,
+      "neo4j_result_hops": 4,
+      "pg_result_hops": 4,
+      "pg_timed_out": false,
+      "neo4j": {
+        "n": 50,
+        "mean_ms": 0.681,
+        "median_ms": 0.631,
+        "stdev_ms": 0.213,
+        "p90_ms": 0.8,
+        "min_ms": 0.563,
+        "max_ms": 2.012
+      },
+      "postgresql": {
+        "n": 50,
+        "mean_ms": 25.474,
+        "median_ms": 25.118,
+        "stdev_ms": 1.194,
+        "p90_ms": 26.083,
+        "min_ms": 24.823,
+        "max_ms": 31.76
+      },
+      "speedup_neo4j_vs_pg": 37.41
+    },
+    "dist_max": {
+      "src": 10995116278624,
+      "dst": 19791209300364,
+      "actual_hops": 3,
+      "neo4j_result_hops": 3,
+      "pg_result_hops": 3,
+      "pg_timed_out": false,
+      "neo4j": {
+        "n": 50,
+        "mean_ms": 0.675,
+        "median_ms": 0.573,
+        "stdev_ms": 0.347,
+        "p90_ms": 0.84,
+        "min_ms": 0.538,
+        "max_ms": 2.314
+      },
+      "postgresql": {
+        "n": 50,
+        "mean_ms": 15.425,
+        "median_ms": 15.361,
+        "stdev_ms": 0.276,
+        "p90_ms": 15.808,
+        "min_ms": 15.12,
+        "max_ms": 16.57
+      },
+      "speedup_neo4j_vs_pg": 22.85
+    }
+  },
+  "metadata": {
+    "timestamp": "2026-06-13T13:22:25.204278",
+    "scale_factor": "0.3",
+    "n_runs": 50,
+    "n_warmup": 20,
+    "n_persons": 1700,
+    "sampling": "5 low + 5 mid + 5 high",
+    "neo4j_version": "5.20.0-community",
+    "postgres_version": "14.4",
+    "methodological_notes": {
+      "p90_jvm_gc": "Il P90 di Neo4j \u00e8 fisiologicamente pi\u00f9 alto della mediana a causa dei cicli di Garbage Collection (GC) della JVM. Durante uno Stop-The-World GC pause, tutti i thread applicativi vengono brevemente sospesi, causando picchi isolati di latenza. La mediana rimane invariata.",
+      "triangle_count_gds": "Il test 1.2a usa Cypher OLTP puro. Con GDS (gds.triangleCount.write) Neo4j supera ampiamente PostgreSQL su questa metrica OLAP."
+    }
+  }
+}

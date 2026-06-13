@@ -1,3 +1,20 @@
+# =============================================================================
+# docker-compose.yml – Benchmark Lab (single-node Neo4j + PostgreSQL)
+# =============================================================================
+# Configurazione RAM per host con 16 GB totali:
+#
+#   Neo4j  : limit=8G (heap=4G + pagecache=2.5G + JVM overhead ~1.5G)
+#   Postgres: limit=5.5G (shared_buffers=1.5G; Linux OS cache usa il resto)
+#   OS Linux: ~2G riservati al sistema operativo
+#   TOTALE  : 8 + 5.5 + 2 = 15.5 GB  →  0.5 GB margine anti-OOM
+#
+# REGOLA JVM CRITICA: il limite del container Neo4j deve essere almeno
+# 1.5-2 GB SUPERIORE a (heap_max + pagecache). Questo headroom è necessario
+# per JIT code cache, thread stacks, Metaspace, native memory Lucene e overhead
+# GC. Con meno headroom il kernel Linux invia SIGKILL al container durante
+# i benchmark (OOM kill), rendendo i risultati non riproducibili.
+# =============================================================================
+
 services:
   neo4j:
     image: neo4j:5.20.0-community
@@ -7,9 +24,11 @@ services:
       - "7687:7687"
     environment:
       - NEO4J_AUTH=neo4j/password
-      - NEO4J_server_memory_heap_initial__size=6G
-      - NEO4J_server_memory_heap_max__size=6G
-      - NEO4J_server_memory_pagecache_size=2G
+      # heap=4G + pagecache=2.5G = 6.5G configurati
+      # container limit=8G → 1.5G headroom per JVM overhead (safe)
+      - NEO4J_server_memory_heap_initial__size=4G
+      - NEO4J_server_memory_heap_max__size=4G
+      - NEO4J_server_memory_pagecache_size=2500m
     volumes:
       - ./data/neo4j-sf${SCALE_FACTOR:-0.1}:/data
     deploy:
@@ -18,11 +37,16 @@ services:
           cpus: '4.0'
           memory: 8G
 
+
   postgres:
     image: postgres:14.4
     container_name: postgres-benchmark
     ports:
       - "5432:5432"
+    # shared_buffers = ~25% del limite container (regola standard PG)
+    # work_mem = 32MB: sicuro con query parallele (128MB era rischioso per OOM
+    # perché viene allocato per-operazione-per-connessione, non globalmente)
+    command: ["postgres", "-c", "shared_buffers=1536MB", "-c", "work_mem=32MB", "-c", "effective_cache_size=4GB"]
     environment:
       - POSTGRES_PASSWORD=mysecretpassword
       - POSTGRES_USER=postgres
@@ -33,4 +57,4 @@ services:
       resources:
         limits:
           cpus: '4.0'
-          memory: 8G
+          memory: 5500m
