@@ -1,89 +1,61 @@
-# Reproducing the LDBC SNB dual-database Benchmarking Lab
+# Graph Databases & Neo4j Analysis (LDBC SNB)
 
-This guide explains how to set up the Database Benchmarking Lab from scratch on a completely fresh Ubuntu 26.04 machine. It covers generating the synthetic dataset, setting up the required repositories, and automatically building isolated Neo4j and PostgreSQL databases fairly using the exact same source data.
+Questo repository contiene un laboratorio completo per eseguire benchmark, testare e analizzare le differenze di performance tra un database a grafo nativo (**Neo4j**) e un database relazionale tradizionale (**PostgreSQL**). Le valutazioni vengono effettuate utilizzando i dataset e le query del celebre [LDBC Social Network Benchmark (SNB)](https://ldbcouncil.org/benchmarks/snb/).
 
-## 1. Automated Lab Workflow (Using Makefile)
+## Obiettivo del Progetto
 
-The entire lab is now automated via a `Makefile`. This standardizes the build process and guarantees a reproducible, clean-slate environment for every benchmark.
+Lo scopo principale di questa analisi è misurare le prestazioni e l'efficienza nell'esecuzione di query complesse e traversal su strutture a grafo, confrontando:
+- L'approccio *Index-Free Adjacency* e l'espressività del linguaggio **Cypher** di Neo4j.
+- Le classiche join relazionali, le Common Table Expressions (CTE) e l'ottimizzazione tramite indici in **SQL** su PostgreSQL.
 
-Navigate to the benchmark lab directory:
+## Struttura del Repository
+
+L'intero codice per l'infrastruttura e le analisi si trova all'interno della cartella `benchmark-lab`, suddivisa nelle seguenti sezioni:
+
+- 📊 **`benchmark-lab/benchmarks/`**: Contiene il core dell'analisi. Troverai gli script Python per eseguire la suite di test (es. `system_profiler.py`, `collect_query_plans.py`), organizzati in vari scenari di carico, oltre ai Makefile necessari per automatizzare l'estrazione delle metriche (tempi di esecuzione, utilizzo RAM/CPU, execution plan).
+- 🏗️ **`benchmark-lab/infrastructure/`**: Include l'Infrastruttura as Code (Docker Compose), gli script per sistemare i CSV e automatizzare il setup, la generazione dei dati grezzi e l'importazione nei due database per garantire un ambiente sempre pulito e riproducibile.
+- ⚙️ **`benchmark-lab (No Makefile)/`**: Fornisce una versione puramente bash (senza l'orchestratore `make`) degli script di importazione e configurazione dei container.
+
+> 💡 **Nota**: Gli script automatizzati per il setup e la generazione dell'infrastruttura (con e senza Makefile) sono stati estrapolati anche in un **repository separato standalone**, pensato esclusivamente per l'automazione dei database: [neo4j_postgresql_ldbc_snb_automation](https://github.com/mbroglio/neo4j_postgresql_ldbc_snb_automation).
+
+## Come riprodurre i Benchmark
+
+Il flusso di test è stato completamente automatizzato per standardizzare le procedure su qualsiasi macchina Ubuntu.
+
+### 1. Inizializzazione dell'ambiente
+Spostati nella cartella infrastrutturale, installa le dipendenze, genera il dataset e inizializza i database. (Il parametro `SF` indica lo Scale Factor, es. 0.1, 1, 10).
 ```bash
-cd ~/benchmark-lab/infrastructure
-```
-
-### Install Prerequisites
-Run this once on a fresh machine to install Python, Docker, and the necessary Postgres adapters:
-```bash
+cd benchmark-lab/infrastructure
 make setup
+make generate SF=0.1
+make build SF=0.1
+make up SF=0.1
 ```
 
-### Generate Data
-Generate the raw LDBC SNB dataset. The Scale Factor (SF) determines the size of the generated graph (e.g., SF0.1 = ~100MB, SF1 = ~1GB). 
-
+### 2. Avvio dei Test e Analisi
+Una volta che i container di Neo4j e PostgreSQL sono pronti, recati nella cartella dei benchmark per lanciare la profilazione delle query e raccogliere i risultati.
 ```bash
-# Generates SF0.1 by default
-make generate-data
+cd ../benchmarks
 
-# To generate a different scale factor, e.g., SF1
-make generate-data SCALE_FACTOR=1
+# Esegui la profilazione del sistema e delle query
+python3 system_profiler.py
+# (Oppure utilizza i comandi previsti nel Makefile interno)
 ```
 
-### Build the Databases
-This step patches CSV headers for Neo4j, merges chunks for Postgres, and builds both database storage engines simultaneously using the scale factor you specify:
-
+### 3. Teardown
+Dopo i test, per garantire un ambiente "pulito" (clean-slate) per la sessione successiva, puoi distruggere l'ambiente. I CSV originali verranno mantenuti.
 ```bash
-# Builds SF0.1 databases by default
-make build
-
-# To build for a different scale factor
-make build SCALE_FACTOR=1
-```
-
-### Start the Lab
-Spin up the optimized, isolated Docker containers for querying:
-
-```bash
-# Starts the databases
-make up
-
-# Starts the databases for a specific scale factor
-make up SCALE_FACTOR=1
-```
-
-You can now connect and run your benchmarks!
-
-### Connecting via GUI (DBeaver)
-You can easily connect to both databases using a database tool like **DBeaver** to inspect the data or execute test queries:
-
-**To Benchmark Neo4j:**
-- **URL/Host:** `localhost`
-- **Port:** `7687`
-- **Username:** `neo4j`
-- **Password:** `password`
-*(Note: You can also access the Neo4j Browser at http://localhost:7474)*
-
-**To Benchmark PostgreSQL:**
-- **JDBC URL:** `jdbc:postgresql://localhost:5432/ldbcsf01`
-- **Database:** `ldbcsnb`
-- **Username:** `postgres`
-- **Password:** `mysecretpassword`
-
-### Teardown & Clean (Usa e Getta)
-Once you are done benchmarking, ensure you tear down the environment to guarantee a clean slate for the next test.
-
-```bash
-# Stops containers and DESTROYS the optimized database files (clean slate)
+cd ../infrastructure
 make clean
-
-# Same as above, but for a specific scale factor
-make clean SCALE_FACTOR=1
 ```
 
-*(Note: `make clean` keeps your generated raw CSV data. If you want to delete everything, including the raw data, run `make deep-clean`).*
+## Connessione Manuale ai Database
 
-## Advanced: The Reset Command
-If you want to completely destroy the current database state, rebuild them from the raw files, and start them up again in one single command (ideal for automated CI/CD benchmark pipelines), just run:
-
-```bash
-make reset SCALE_FACTOR=0.1
-```
+Se desideri collegarti manualmente per esplorare lo schema o testare le query (tramite CLI o UI come DBeaver):
+- **Neo4j**: 
+  - **URL**: `localhost:7687` (Interfaccia web: `http://localhost:7474`)
+  - **Credenziali**: `neo4j` / `password`
+- **PostgreSQL**: 
+  - **JDBC URL**: `jdbc:postgresql://localhost:5432/ldbcsf01`
+  - **Database**: `ldbcsnb`
+  - **Credenziali**: `postgres` / `mysecretpassword`
